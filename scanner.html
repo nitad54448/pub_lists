@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Academic Publication Scanner</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+
+        .scanner-card {
+            background-color: var(--surface);
+            border-radius: 8px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            margin-bottom: 2rem;
+        }
+
+        h1 { margin-top: 0; color: var(--primary); }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-main);
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .publication-item {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--primary);
+            padding: 1.5rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+
+        .pub-title {
+            font-size: 1.125rem;
+            font-weight: bold;
+            margin: 0 0 0.5rem 0;
+            color: var(--primary);
+        }
+
+        .pub-authors {
+            font-size: 0.95rem;
+            margin: 0 0 0.5rem 0;
+            color: var(--text-main);
+        }
+
+        .pub-meta {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            background: var(--bg);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        .highlight {
+            font-weight: bold;
+            background-color: #fef08a;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="scanner-card">
+        <h1>Publication Scanner</h1>
+        <p style="color: var(--text-muted); margin-top: -10px; margin-bottom: 20px;">
+            Searches the OpenAlex academic database. Returns exact titles, author lists, and DOIs.
+        </p>
+        
+        <div class="form-grid">
+            <div>
+                <label for="authorName">Author Name (e.g., N. Dupont, Dupont)</label>
+                <input type="text" id="authorName" placeholder="Enter name..." required>
+            </div>
+            <div>
+                <label for="pubType">Publication Type</label>
+                <select id="pubType">
+                    <option value="all">All Types</option>
+                    <option value="article">Journal Article</option>
+                    <option value="proceedings-article">Conference Proceeding</option>
+                    <option value="book-chapter">Book / Chapter</option>
+                    <option value="preprint">Preprint / Poster / Talk</option>
+                </select>
+            </div>
+            <div>
+                <label for="yearStart">Start Year</label>
+                <input type="number" id="yearStart" placeholder="e.g., 2015">
+            </div>
+            <div>
+                <label for="yearEnd">End Year</label>
+                <input type="number" id="yearEnd" placeholder="e.g., 2026">
+            </div>
+        </div>
+        <button id="searchBtn" onclick="performSearch()">Scan Publications</button>
+    </div>
+
+    <div id="resultsContainer" style="display: none;">
+        <div class="results-header">
+            <h2 style="margin: 0;">Scan Results</h2>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <span id="resultCount" style="color: var(--text-muted); font-weight: 600;"></span>
+                <button id="exportBtn" onclick="exportToACS()" style="padding: 0.4rem 0.8rem; font-size: 0.875rem; width: auto; background-color: #10b981;">Export ACS (.txt)</button>
+            </div>
+        </div>
+        <div id="loading">Scanning databases... Please wait.</div>
+        <div id="publicationList"></div>
+    </div>
+
+    <script>
+        function isAuthorMatch(authorStr, query) {
+            if (!authorStr) return false;
+            const clean = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            const qTokens = clean(query).split(/[\s,.-]+/).filter(Boolean);
+            const aTokens = clean(authorStr).split(/[\s,.-]+/).filter(Boolean);
+
+            return qTokens.every(qTok => {
+                if (qTok.length === 1) {
+                    return aTokens.some(aTok => aTok.startsWith(qTok));
+                }
+                return aTokens.some(aTok => aTok.includes(qTok) || qTok.includes(aTok));
+            });
+        }
+
+        async function performSearch() {
+            const nameInput = document.getElementById('authorName').value.trim();
+            const typeInput = document.getElementById('pubType').value;
+            const yearStart = parseInt(document.getElementById('yearStart').value, 10);
+            const yearEnd = parseInt(document.getElementById('yearEnd').value, 10);
+
+            const btn = document.getElementById('searchBtn');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const loading = document.getElementById('loading');
+            const pubList = document.getElementById('publicationList');
+            const countDisplay = document.getElementById('resultCount');
+
+            if (!nameInput) {
+                alert("Please enter an author name.");
+                return;
+            }
+
+            btn.disabled = true;
+            pubList.innerHTML = '';
+            countDisplay.innerHTML = '';
+            resultsContainer.style.display = 'block';
+            loading.style.display = 'block';
+
+            try {
+                const openAlexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(nameInput)}&per-page=100`;
+                const crossrefUrl = `https://api.crossref.org/works?query.author=${encodeURIComponent(nameInput)}&rows=100`;
+                const halUrl = `https://api.archives-ouvertes.fr/search/?q=${encodeURIComponent(nameInput)}&wt=json&fl=title_s,authFullName_s,producedDateY_i,doiId_s,docType_s,halId_s,journalTitle_s,conferenceTitle_s,city_s,country_s,conferenceStartDate_s&rows=100`;
+
+                const [oaRes, crRes, halRes] = await Promise.allSettled([
+                    fetch(openAlexUrl).then(r => r.ok ? r.json() : { results: [] }),
+                    fetch(crossrefUrl).then(r => r.ok ? r.json() : { message: { items: [] } }),
+                    fetch(halUrl).then(r => r.ok ? r.json() : { response: { docs: [] } })
+                ]);
+
+                let unifiedWorks = [];
+
+                // 1. Process OpenAlex
+                if (oaRes.status === 'fulfilled' && oaRes.value?.results) {
+                    oaRes.value.results.forEach(work => {
+                        const authors = (work.authorships || [])
+                            .map(a => a.author?.display_name || a.raw_author_name || '')
+                            .filter(Boolean);
+                        unifiedWorks.push({
+                            title: work.title || "Untitled Document",
+                            authors: authors,
+                            year: work.publication_year,
+                            doi: work.doi || work.id || '',
+                            venue: work.primary_location?.source?.display_name || "Unknown Venue",
+                            type: (work.type || 'publication').replace('-', ' ')
+                        });
+                    });
+                }
+
+                // 2. Process Crossref
+                if (crRes.status === 'fulfilled' && crRes.value?.message?.items) {
+                    crRes.value.message.items.forEach(item => {
+                        const authors = (item.author || [])
+                            .map(a => `${a.given || ''} ${a.family || ''}`.trim())
+                            .filter(Boolean);
+                        const year = item.issued?.['date-parts']?.[0]?.[0] || item.created?.['date-parts']?.[0]?.[0] || null;
+                        unifiedWorks.push({
+                            title: item.title?.[0] || "Untitled Document",
+                            authors: authors,
+                            year: year,
+                            doi: item.DOI ? (item.DOI.startsWith('http') ? item.DOI : `https://doi.org/${item.DOI}`) : '',
+                            venue: item['container-title']?.[0] || "Crossref",
+                            type: (item.type || 'publication').replace('-', ' ')
+                        });
+                    });
+                }
+                
+                // 3. Process HAL Archives (Crucial for Posters and Conferences)
+                if (halRes.status === 'fulfilled' && halRes.value?.response?.docs) {
+                    halRes.value.response.docs.forEach(doc => {
+                        const typeStr = doc.docType_s ? doc.docType_s.toLowerCase() : 'hal-document';
+                        
+                        // Build a richer venue string for conferences/posters
+                        let venueParts = [];
+                        if (doc.journalTitle_s) venueParts.push(doc.journalTitle_s);
+                        if (doc.conferenceTitle_s) venueParts.push(doc.conferenceTitle_s);
+                        if (doc.city_s) venueParts.push(doc.city_s);
+                        if (doc.country_s) venueParts.push(doc.country_s);
+                        
+                        let venueStr = venueParts.length > 0 ? venueParts.join(', ') : "HAL Open Archive";
+
+                        unifiedWorks.push({
+                            title: doc.title_s ? doc.title_s[0] : "Untitled Document",
+                            authors: doc.authFullName_s || [],
+                            year: doc.producedDateY_i || null,
+                            doi: doc.doiId_s ? `https://doi.org/${doc.doiId_s}` : (doc.halId_s ? `https://hal.science/${doc.halId_s}` : ''),
+                            venue: venueStr,
+                            type: typeStr === 'poster' ? 'poster' : (typeStr === 'comm' ? 'conference' : (typeStr === 'art' ? 'article' : typeStr))
+                        });
+                    });
+                }
+
+                // Type Mapping for Dropdown Filter
+                const typeMapping = {
+                    'article': ['article', 'journal', 'art'],
+                    'proceedings-article': ['proceeding', 'conference', 'comm'],
+                    'book-chapter': ['book', 'chapter', 'ouv', 'couv'],
+                    'preprint': ['preprint', 'poster', 'presentation', 'posted-content', 'dataset', 'report']
+                };
+
+                const seenKeys = new Set();
+                const filteredWorks = unifiedWorks.filter(work => {
+                    if (yearStart && work.year && work.year < yearStart) return false;
+                    if (yearEnd && work.year && work.year > yearEnd) return false;
+                    
+                    // Improved type matching based on the dropdown
+                    if (typeInput !== 'all') {
+                        const allowedTypes = typeMapping[typeInput] || [];
+                        const workTypeLower = work.type.toLowerCase();
+                        if (!allowedTypes.some(t => workTypeLower.includes(t))) return false;
+                    }
+
+                    const hasAuthor = work.authors.some(a => isAuthorMatch(a, nameInput));
+                    if (!hasAuthor) return false;
+
+                    const key = work.doi
+                        ? work.doi.toLowerCase().replace(/^https?:\/\/doi\.org\//, '')
+                        : work.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                    if (!key || seenKeys.has(key)) return false;
+                    seenKeys.add(key);
+                    return true;
+                });
+
+                filteredWorks.sort((a, b) => (b.year || 0) - (a.year || 0));
+                window.currentScanResults = filteredWorks; // Save globally for the export function
+
+                loading.style.display = 'none';
+                countDisplay.innerHTML = `${filteredWorks.length} found`;
+
+                if (filteredWorks.length === 0) {
+                    pubList.innerHTML = `<p style="color: var(--text-muted);">No publications found matching these criteria.</p>`;
+                } else {
+                    filteredWorks.forEach(work => {
+                        const authorsFormatted = work.authors.map(author => {
+                            return isAuthorMatch(author, nameInput)
+                                ? `<span class="highlight">${author}</span>`
+                                : author;
+                        }).join(', ');
+
+                        const pubHTML = `
+                            <div class="publication-item">
+                                <h3 class="pub-title">
+                                    <a href="${work.doi || '#'}" target="_blank" style="color: inherit; text-decoration: none;">
+                                        ${work.title}
+                                    </a>
+                                </h3>
+                                <p class="pub-authors">${authorsFormatted}</p>
+                                <div class="pub-meta">
+                                    <span class="tag">${work.type}</span>
+                                    <span><strong>${work.year || 'N/A'}</strong></span>
+                                    <span>${work.venue}</span>
+                                    ${work.doi ? `<span><a href="${work.doi}" target="_blank">View Source ↗</a></span>` : ''}
+                                </div>
+                            </div>
+                        `;
+                        pubList.insertAdjacentHTML('beforeend', pubHTML);
+                    });
+                }
+            } catch (error) {
+                loading.style.display = 'none';
+                pubList.innerHTML = `<p style="color: red;">Error fetching data: ${error.message}</p>`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function exportToACS() {
+            if (!window.currentScanResults || window.currentScanResults.length === 0) {
+                alert("No results to export.");
+                return;
+            }
+
+            let textContent = "Publication List (ACS Style)\n\n";
+
+            window.currentScanResults.forEach((work, index) => {
+                // Format Authors (ACS: Lastname, F. M.; Lastname, F. M.)
+                let formattedAuthors = work.authors.map(author => {
+                    if (author.includes(',')) return author; // Assume already formatted
+                    let parts = author.trim().split(/\s+/);
+                    if (parts.length === 1) return parts[0];
+                    let lastName = parts.pop();
+                    let initials = parts.map(p => p[0].toUpperCase() + '.').join(' ');
+                    return `${lastName}, ${initials}`;
+                }).join('; ');
+
+                if (formattedAuthors && !formattedAuthors.endsWith('.')) formattedAuthors += '.';
+
+                // Format Title
+                let title = work.title ? work.title.trim() : "Untitled Document";
+                if (!title.endsWith('.')) title += '.';
+
+                // Format Venue & Year
+                let venue = work.venue || "Unknown Venue";
+                let year = work.year || "n.d.";
+                
+                // Construct ACS format: Authors. Title. Venue Year. DOI
+                let acsString = `${formattedAuthors} ${title} ${venue} ${year}. ${work.doi ? work.doi : ''}`;
+                
+                textContent += `[${index + 1}] ${acsString}\n\n`;
+            });
+
+            // Trigger download as .txt
+            const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'publications_acs.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
