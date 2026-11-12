@@ -181,6 +181,7 @@
             </div>
         </div>
         <div id="loading">Scanning databases... Please wait.</div>
+        <p id="coverageNotice" role="status" style="color: var(--text-muted);"></p>
         <div id="publicationList"></div>
     </div>
 
@@ -219,6 +220,9 @@
             btn.disabled = true;
             pubList.innerHTML = '';
             countDisplay.innerHTML = '';
+            window.currentScanResults = [];
+            window.currentScanCoverage = '';
+            document.getElementById('coverageNotice').textContent = '';
             resultsContainer.style.display = 'block';
             loading.style.display = 'block';
 
@@ -228,10 +232,23 @@
                 const halUrl = `https://api.archives-ouvertes.fr/search/?q=${encodeURIComponent(nameInput)}&wt=json&fl=title_s,authFullName_s,producedDateY_i,doiId_s,docType_s,halId_s,journalTitle_s,conferenceTitle_s,city_s,country_s,conferenceStartDate_s&rows=100`;
 
                 const [oaRes, crRes, halRes] = await Promise.allSettled([
-                    fetch(openAlexUrl).then(r => r.ok ? r.json() : { results: [] }),
-                    fetch(crossrefUrl).then(r => r.ok ? r.json() : { message: { items: [] } }),
-                    fetch(halUrl).then(r => r.ok ? r.json() : { response: { docs: [] } })
+                    fetch(openAlexUrl).then(r => { if (!r.ok) throw Error(`HTTP ${r.status}`); return r.json(); }),
+                    fetch(crossrefUrl).then(r => { if (!r.ok) throw Error(`HTTP ${r.status}`); return r.json(); }),
+                    fetch(halUrl).then(r => { if (!r.ok) throw Error(`HTTP ${r.status}`); return r.json(); })
                 ]);
+
+                const coverage = (name, response, items, total) => {
+                    if (response.status !== 'fulfilled' || !Array.isArray(items)) return `${name}: unavailable; coverage incomplete.`;
+                    return `${name}: ${items.length} records fetched` +
+                        (Number.isFinite(total) ? ` of ${total} reported` : ' (total unavailable)') +
+                        (Number.isFinite(total) && total > items.length ? '; truncated.' : '.');
+                };
+                window.currentScanCoverage = 'Limited coverage: only the first 100 search records per service are fetched before author/type/year filtering. This is not an exhaustive publication list. ' + [
+                    coverage('OpenAlex', oaRes, oaRes.value?.results, oaRes.value?.meta?.count),
+                    coverage('Crossref', crRes, crRes.value?.message?.items, crRes.value?.message?.['total-results']),
+                    coverage('HAL', halRes, halRes.value?.response?.docs, halRes.value?.response?.numFound)
+                ].join(' ');
+                document.getElementById('coverageNotice').textContent = window.currentScanCoverage;
 
                 let unifiedWorks = [];
 
@@ -377,6 +394,7 @@
             }
 
             let textContent = "Publication List (ACS Style)\n\n";
+            textContent += (window.currentScanCoverage || 'Limited coverage: at most 100 records per service; this list may be incomplete.') + '\n\n';
 
             window.currentScanResults.forEach((work, index) => {
                 // Format Authors (ACS: Lastname, F. M.; Lastname, F. M.)
