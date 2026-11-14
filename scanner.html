@@ -186,6 +186,9 @@
     </div>
 
     <script>
+        const escapeHtml = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const safeUrl = u => (typeof u === 'string' && /^https?:\/\//i.test(u.trim())) ? u.trim() : '#';
+
         function isAuthorMatch(authorStr, query) {
             if (!authorStr) return false;
             const clean = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -196,7 +199,7 @@
                 if (qTok.length === 1) {
                     return aTokens.some(aTok => aTok.startsWith(qTok));
                 }
-                return aTokens.some(aTok => aTok.includes(qTok) || qTok.includes(aTok));
+                return aTokens.some(aTok => aTok.includes(qTok) || (aTok.length > 1 && qTok.includes(aTok)));
             });
         }
 
@@ -348,31 +351,34 @@
                 window.currentScanResults = filteredWorks; // Save globally for the export function
 
                 loading.style.display = 'none';
-                countDisplay.innerHTML = `${filteredWorks.length} found`;
+                countDisplay.textContent = `${filteredWorks.length} found`;
 
                 if (filteredWorks.length === 0) {
                     pubList.innerHTML = `<p style="color: var(--text-muted);">No publications found matching these criteria.</p>`;
                 } else {
                     filteredWorks.forEach(work => {
                         const authorsFormatted = work.authors.map(author => {
+                            const safeAuthor = escapeHtml(author);
                             return isAuthorMatch(author, nameInput)
-                                ? `<span class="highlight">${author}</span>`
-                                : author;
+                                ? `<span class="highlight">${safeAuthor}</span>`
+                                : safeAuthor;
                         }).join(', ');
+                        const href = safeUrl(work.doi);
+                        const safeHref = escapeHtml(href);
 
                         const pubHTML = `
                             <div class="publication-item">
                                 <h3 class="pub-title">
-                                    <a href="${work.doi || '#'}" target="_blank" style="color: inherit; text-decoration: none;">
-                                        ${work.title}
+                                    <a href="${safeHref}" ${href !== '#' ? 'target="_blank" rel="noopener noreferrer"' : ''} style="color: inherit; text-decoration: none;">
+                                        ${escapeHtml(work.title)}
                                     </a>
                                 </h3>
                                 <p class="pub-authors">${authorsFormatted}</p>
                                 <div class="pub-meta">
-                                    <span class="tag">${work.type}</span>
-                                    <span><strong>${work.year || 'N/A'}</strong></span>
-                                    <span>${work.venue}</span>
-                                    ${work.doi ? `<span><a href="${work.doi}" target="_blank">View Source ↗</a></span>` : ''}
+                                    <span class="tag">${escapeHtml(work.type)}</span>
+                                    <span><strong>${escapeHtml(work.year || 'N/A')}</strong></span>
+                                    <span>${escapeHtml(work.venue)}</span>
+                                    ${href !== '#' ? `<span><a href="${safeHref}" target="_blank" rel="noopener noreferrer">View Source ↗</a></span>` : ''}
                                 </div>
                             </div>
                         `;
@@ -381,7 +387,7 @@
                 }
             } catch (error) {
                 loading.style.display = 'none';
-                pubList.innerHTML = `<p style="color: red;">Error fetching data: ${error.message}</p>`;
+                pubList.innerHTML = `<p style="color: red;">Error fetching data: ${escapeHtml(error.message)}</p>`;
             } finally {
                 btn.disabled = false;
             }
